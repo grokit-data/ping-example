@@ -1,0 +1,444 @@
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+    networks:
+    - paranet
+    ports:
+      - "3306"
+    healthcheck:
+      test: /usr/bin/mysql --user=root --password=admin --execute "SHOW DATABASES;"
+      interval: 5s
+      timeout: 20s
+      retries: 10
+    labels:
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+  mongodb:
+    image: mongo:6
+    healthcheck:
+      test: "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+      interval: 5s
+      timeout: 20s
+      retries: 10
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=admin
+    labels:
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+    networks:
+      - paranet
+    ports:
+      - "27017"
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=paraflow
+    healthcheck:
+      test: "pg_isready -U postgres"
+      interval: 5s
+      timeout: 20s
+      retries: 10
+    labels:
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+    networks:
+      - paranet
+    ports:
+      - "5432"
+  paracord:
+    image: paracord:latest
+    networks:
+      - paranet
+    labels:
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+    ports:
+      - "80"
+    volumes:
+      - ./data/config.js:/usr/share/nginx/html/config.js
+
+  broker:
+    image: ghcr.io/grokit-data/paranet-broker/paranet-broker-sim:${PARANET_VERSION:-latest}
+    platform: linux/amd64
+    environment:
+      DBNAME: postgres
+      PARAMODELS_BUCKET: ""
+      PARANET_DOCUMENTS_BUCKET: ""
+      PARANET_META_MODELS_BUCKET: ""
+      AWS_ACCESS_KEY_ID: x
+      AWS_SECRET_ACCESS_KEY: x
+      HOST_SLACK_GATEWAY: slack-gateway
+      PARANET_CONVERSATIONS_DB: postgres://postgres:postgres@postgres:5432/postgres
+      PARANET_MODELS_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_META_MODELS_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_MODELS_OBJECTS: file:///objects/models
+      PARANET_META_MODELS_OBJECTS: file:///objects/models/md
+      PARANET_SCHEMA_DB: file:///paranet/schemas
+      PARANET_LABEL_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_MODELS_LOCAL: /paranet/models
+      PARANET_META_MODELS_LOCAL: /paranet/models/md
+      SLACK_GATEWAY: http://slack-gateway:8001
+      RUST_LOG: debug
+      RUST_BACKTRACE: 1
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    links:
+      - mongodb
+      - postgres
+    volumes:
+      - ./objects:/objects
+      - ./net/models:/paranet/models
+    command:
+      - paranet-broker
+    healthcheck:
+      test: [ "CMD", "grpc_health_probe", "-addr=localhost:3131" ]
+      interval: 5s
+      timeout: 20s
+      retries: 10
+    labels:
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+    ports:
+      - "3131"
+    networks:
+      - paranet
+
+  service:
+    image: ghcr.io/grokit-data/paranet-broker/paranet-service:${PARANET_VERSION:-latest}
+    platform: linux/amd64
+    environment:
+      DBNAME: postgres
+      PARAMODELS_BUCKET: ""
+      PARANET_DOCUMENTS_BUCKET: ""
+      PARANET_META_MODELS_BUCKET: ""
+      AWS_ACCESS_KEY_ID: x
+      AWS_SECRET_ACCESS_KEY: x
+      PARANET_BROKER_HOST: http://broker:3131
+      PARANET_MODEL_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_META_MODELS_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_MODELS_OBJECTS: file:///objects/models
+      PARANET_META_MODELS_OBJECTS: file:///objects/models/md
+      PARANET_SCHEMA_DB: file:///paranet/schemas
+      PARANET_CONVERSATIONS_DB: postgres://postgres:postgres@postgres:5432/postgres
+      PARANET_PANELS_META_DB: file:///paranet/panels/md
+      PARANET_PANELS_FILE_DB: file:///paranet/panels/src
+      PARANET_PANELS_META_OBJECTS: file:///objects/panels
+      PARANET_DOCUMENT_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_DOCUMENT_OBJECTS: file:///objects/documents
+      PARANET_LABEL_DB: mongodb://root:admin@mongodb:27017/paranet?authSource=admin
+      PARANET_SEARCH_DB: empty://
+      HOST_SLACK_GATEWAY: localhost
+      RUST_LOG: paranet=debug
+    depends_on:
+      
+      broker:
+        # fix race condition between service and broker to create tables
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3132"
+    links:
+      - mongodb
+      - broker
+      - postgres
+    command:
+      - paranet-service
+    labels:
+      - ai.paranet.name=ping-example
+    networks:
+      - paranet
+    volumes:
+      - ./objects:/objects
+  paranet_proxy:
+    image: nginx:latest
+    volumes:
+      - ./data/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "${PARANET_PORT:-3023}:3023"
+    labels:
+      - ai.paranet.port=${PARANET_PORT:-3023}
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+    networks:
+      - paranet
+  debugger:
+    image: ghcr.io/grokit-data/paraflow/debugger:${PARAFLOW_VERSION:-latest}
+    platform: linux/amd64
+    ports:
+      - "80"
+    networks:
+      - paranet
+  # net_debugger:
+  #   image: ghcr.io/grokit-data/paraflow/paraflow:testdrive-v1.33.2
+  #   environment:
+  #     RUST_LOG: net_debugger=debug
+  #   ports:
+  #     - "3035:3035"
+  #   command:
+  #     - /usr/local/bin/net-debugger
+  ping-rcv-paraflow:
+    image: ghcr.io/grokit-data/getting-started/ping-example/ping-rcv-paraflow:0.0.1
+    platform: linux/amd64
+    build:
+      context: .
+      additional_contexts:
+        copy_sql: debug-env
+        copy_paraflow: /Users/paquinn/grokit/getting-started/examples/ping/ping_rcv
+      dockerfile: dockerfile/paraflow.Dockerfile
+      target: build
+      args:
+        PARAFLOW_VERSION: ${PARAFLOW_VERSION:-latest}
+        REGISTRY: ghcr.io/grokit-data/
+        PARAFLOW_FILE: ping_rcv.paraflow
+      labels:
+        - org.opencontainers.image.source=https://github.com/grokit-data/getting-started
+    environment:
+      PARAFLOW_DB_HOST: mysql:3306
+      PARAFLOW_BACKEND: mysql
+      PARAFLOW_PARANET_HOST: http://broker:3131
+      PARAFLOW_PARANET_SVC_HOST: http://service:3132
+      PARAFLOW_PARANET_ACTOR_ID_OVERRIDE: ping-rcv@0.0.1
+      PARAFLOW_DATABASE: ping-rcv
+      PARAFLOW_MOCKENV: "1"
+      RUST_LOG: debug,hyper::proto=info,h2=info
+      RUST_BACKTRACE: 1
+    entrypoint: ["/usr/local/bin/paraflow"]
+    command:
+      - /paraflow/actor/ping_rcv.paraflow
+      - --schema
+      - /paraflow/data/debug.sql
+      - --register
+      - --register-base
+      - --debugger
+      - --log-net
+    depends_on:
+      mysql: 
+        condition: service_healthy
+      
+      broker:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "3030"
+    restart: always
+    networks:
+    - paranet
+    labels:
+      - ai.paranet.actor.actor_entity_id=ping-rcv@0.0.1
+      - ai.paranet.name=ping-example
+      - ai.paranet.port=${PARANET_PORT:-3023}
+      - ai.paranet.actor.path=/Users/paquinn/grokit/getting-started/examples/ping/ping_rcv
+      - ai.paranet.actor.paraflow=ping_rcv.paraflow
+      - ai.paranet.cli_version=0.4.0
+  ping-send-paraflow:
+    image: ghcr.io/grokit-data/getting-started/ping-example/ping-send-paraflow:0.0.1
+    platform: linux/amd64
+    build:
+      context: .
+      additional_contexts:
+        copy_sql: debug-env
+        copy_paraflow: /Users/paquinn/grokit/getting-started/examples/ping/ping_send
+      dockerfile: dockerfile/paraflow.Dockerfile
+      target: build
+      args:
+        PARAFLOW_VERSION: ${PARAFLOW_VERSION:-latest}
+        REGISTRY: ghcr.io/grokit-data/
+        PARAFLOW_FILE: ping_send.paraflow
+      labels:
+        - org.opencontainers.image.source=https://github.com/grokit-data/getting-started
+    environment:
+      PARAFLOW_DB_HOST: mysql:3306
+      PARAFLOW_BACKEND: mysql
+      PARAFLOW_PARANET_HOST: http://broker:3131
+      PARAFLOW_PARANET_SVC_HOST: http://service:3132
+      PARAFLOW_PARANET_ACTOR_ID_OVERRIDE: ping-send@0.0.1
+      PARAFLOW_DATABASE: ping-send
+      PARAFLOW_MOCKENV: "1"
+      RUST_LOG: debug,hyper::proto=info,h2=info
+      RUST_BACKTRACE: 1
+    entrypoint: ["/usr/local/bin/paraflow"]
+    command:
+      - /paraflow/actor/ping_send.paraflow
+      - --schema
+      - /paraflow/data/debug.sql
+      - --register
+      - --register-base
+      - --debugger
+      - --log-net
+    depends_on:
+      mysql: 
+        condition: service_healthy
+      
+      broker:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "3030"
+    restart: always
+    networks:
+    - paranet
+    labels:
+      - ai.paranet.actor.actor_entity_id=ping-send@0.0.1
+      - ai.paranet.name=ping-example
+      - ai.paranet.port=${PARANET_PORT:-3023}
+      - ai.paranet.actor.path=/Users/paquinn/grokit/getting-started/examples/ping/ping_send
+      - ai.paranet.actor.paraflow=ping_send.paraflow
+      - ai.paranet.cli_version=0.4.0
+  ping-obs-paraflow:
+    image: ghcr.io/grokit-data/getting-started/ping-example/ping-obs-paraflow:0.0.1
+    platform: linux/amd64
+    build:
+      context: .
+      additional_contexts:
+        copy_sql: debug-env
+        copy_paraflow: /Users/paquinn/grokit/getting-started/examples/ping/ping_obs
+      dockerfile: dockerfile/paraflow.Dockerfile
+      target: build
+      args:
+        PARAFLOW_VERSION: ${PARAFLOW_VERSION:-latest}
+        REGISTRY: ghcr.io/grokit-data/
+        PARAFLOW_FILE: ping_obs.paraflow
+      labels:
+        - org.opencontainers.image.source=https://github.com/grokit-data/getting-started
+    environment:
+      PARAFLOW_DB_HOST: mysql:3306
+      PARAFLOW_BACKEND: mysql
+      PARAFLOW_PARANET_HOST: http://broker:3131
+      PARAFLOW_PARANET_SVC_HOST: http://service:3132
+      PARAFLOW_PARANET_ACTOR_ID_OVERRIDE: ping-obs@0.0.1
+      PARAFLOW_DATABASE: ping-obs
+      PARAFLOW_MOCKENV: "1"
+      RUST_LOG: debug,hyper::proto=info,h2=info
+      RUST_BACKTRACE: 1
+    entrypoint: ["/usr/local/bin/paraflow"]
+    command:
+      - /paraflow/actor/ping_obs.paraflow
+      - --schema
+      - /paraflow/data/debug.sql
+      - --register
+      - --register-base
+      - --debugger
+      - --log-net
+    depends_on:
+      mysql: 
+        condition: service_healthy
+      
+      broker:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "3030"
+    restart: always
+    networks:
+    - paranet
+    labels:
+      - ai.paranet.actor.actor_entity_id=ping-obs@0.0.1
+      - ai.paranet.name=ping-example
+      - ai.paranet.port=${PARANET_PORT:-3023}
+      - ai.paranet.actor.path=/Users/paquinn/grokit/getting-started/examples/ping/ping_obs
+      - ai.paranet.actor.paraflow=ping_obs.paraflow
+      - ai.paranet.cli_version=0.4.0
+  ping-sidecar-paraflow:
+    image: ghcr.io/grokit-data/getting-started/ping-example/ping-sidecar-paraflow:0.0.1
+    platform: linux/amd64
+    build:
+      context: .
+      additional_contexts:
+        copy_sql: debug-env
+        copy_paraflow: /Users/paquinn/grokit/getting-started/examples/ping/ping_sidecar
+      dockerfile: dockerfile/paraflow.Dockerfile
+      target: build
+      args:
+        PARAFLOW_VERSION: ${PARAFLOW_VERSION:-latest}
+        REGISTRY: ghcr.io/grokit-data/
+        PARAFLOW_FILE: ping_sidecar.paraflow
+      labels:
+        - org.opencontainers.image.source=https://github.com/grokit-data/getting-started
+    environment:
+      PARAFLOW_DB_HOST: mysql:3306
+      PARAFLOW_BACKEND: mysql
+      PARAFLOW_PARANET_HOST: http://broker:3131
+      PARAFLOW_PARANET_SVC_HOST: http://service:3132
+      PARAFLOW_PARANET_ACTOR_ID_OVERRIDE: ping-sidecar@0.0.1
+      PARAFLOW_DATABASE: ping-sidecar
+      PARAFLOW_MOCKENV: "1"
+      ACTOR_ENDPOINT: graphql:http://ping-sidecar-sidecar:4000
+      RUST_LOG: debug,hyper::proto=info,h2=info
+      RUST_BACKTRACE: 1
+    entrypoint: ["/usr/local/bin/paraflow"]
+    command:
+      - /paraflow/actor/ping_sidecar.paraflow
+      - --schema
+      - /paraflow/data/debug.sql
+      - --register
+      - --register-base
+      - --debugger
+      - --log-net
+    depends_on:
+      mysql: 
+        condition: service_healthy
+      
+      broker:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "3030"
+    restart: always
+    networks:
+    - paranet
+    labels:
+      - ai.paranet.actor.actor_entity_id=ping-sidecar@0.0.1
+      - ai.paranet.name=ping-example
+      - ai.paranet.port=${PARANET_PORT:-3023}
+      - ai.paranet.actor.path=/Users/paquinn/grokit/getting-started/examples/ping/ping_sidecar
+      - ai.paranet.actor.paraflow=ping_sidecar.paraflow
+      - ai.paranet.cli_version=0.4.0
+  ping-sidecar-sidecar:
+    image: ghcr.io/grokit-data/getting-started/ping-example/ping-sidecar-sidecar:0.0.1
+    build:
+      labels:
+        - ai.paranet.name=ping-example
+        - ai.paranet.cli_version=0.4.0
+        - org.opencontainers.image.source=https://github.com/grokit-data/getting-started
+      context: .
+      dockerfile: dockerfile/npm.Dockerfile
+      additional_contexts:
+        actor: /Users/paquinn/grokit/getting-started/examples/ping/ping_sidecar
+      args:
+        COMMAND: start:watch
+    command:
+      - npm
+      - run
+      - start:watch
+    volumes:
+      - /Users/paquinn/grokit/getting-started/examples/ping/ping_sidecar:/app
+    ports:
+      - "4000"
+    environment:
+      ACTOR_PORT: 4000
+    networks:
+      - paranet
+    labels:
+      - ai.paranet.actor.path=/Users/paquinn/grokit/getting-started/examples/ping/ping_sidecar
+      - ai.paranet.actor.port=4000
+      - ai.paranet.name=ping-example
+      - ai.paranet.cli_version=0.4.0
+      - org.opencontainers.image.source=https://github.com/grokit-data/getting-started
+networks:
+  paranet:
+    name: ping-example-network

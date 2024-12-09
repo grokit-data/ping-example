@@ -1,0 +1,7 @@
+id: guest
+name: "Guest user"
+mediums:
+  - id: parabrowser@1.0.0
+    data: {}
+parabrowser:
+  enabled: true

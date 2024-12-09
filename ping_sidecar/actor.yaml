@@ -1,0 +1,6 @@
+name: ping_sidecar2
+version: 1.0.0
+paraflow: ping_sidecar.paraflow
+path: ./ping_sidecar
+npm: start:watch
+service_port: 4000

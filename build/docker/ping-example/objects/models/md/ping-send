@@ -1,0 +1,10 @@
+id: ping-send
+name: ping-send
+auth: null
+call:
+  type: stream
+  body: {}
+instance:
+  multi: false
+  opaque: true
+  broadcastable: false

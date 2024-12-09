@@ -1,0 +1,6 @@
+# This is a special medium, unlike the others. Currently parabrowsers connects directly
+# via a websocket instead of through a medium service. This definition is just used here
+# to define the data mappings and supported input types.
+id: parabrowser@1.0.0
+# unused
+url: "https://paranet.ai/unused"

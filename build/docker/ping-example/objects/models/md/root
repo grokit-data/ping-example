@@ -1,0 +1,8 @@
+id: root
+name: root
+mediums: []
+parabrowser:
+  enabled: true
+passwordHash: null
+authKey: null
+jwtId: null

@@ -1,0 +1,10 @@
+id: ping-sidecar
+name: ping-sidecar
+auth: null
+call:
+  type: stream
+  body: {}
+instance:
+  multi: false
+  opaque: true
+  broadcastable: false

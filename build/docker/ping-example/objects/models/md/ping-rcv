@@ -1,0 +1,10 @@
+id: ping-rcv
+name: ping-rcv
+auth: null
+call:
+  type: stream
+  body: {}
+instance:
+  multi: false
+  opaque: true
+  broadcastable: false

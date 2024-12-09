@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS debug_dummy_table (`id` VARCHAR(255) PRIMARY KEY);

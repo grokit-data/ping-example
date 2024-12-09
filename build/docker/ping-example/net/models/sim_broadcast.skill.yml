@@ -1,0 +1,34 @@
+id: sim_control@0.0.1
+skillType: broadcast # This tells the paranet there are no providers
+skills:
+- subject: sim_control
+  actions:
+  - action: play
+    input:
+      duration:
+        name: paranet:int
+        optional: true
+      speed: paranet:int
+      start_time: paranet:string
+    output: null
+  - action: stop
+    input: null
+    output: null
+  - action: reset
+    input: null
+    output: null
+  - action: roll_call
+    input: null
+    output: null
+  - action: register_sim_agent
+    input:
+      name: paranet:string
+      start_time: paranet:string
+  - action: sim_agent_stopped
+    input:
+      name: paranet:string
+      stop_time: paranet:string
+  - action: sim_agent_finished
+    input:
+      name: paranet:string
+      end_time: paranet:string

@@ -1,0 +1,128 @@
+event system restart startEvent($uid string) {
+  !RollCall($uid);
+}
+
+task !RollCall($uid) {
+  pncp request sim_control/roll_call();
+}
+
+%skill(subject=simulation,action=play)
+%form({"type":"AdaptiveCard","$schema":"http://adaptivecards.io/schemas/adaptive-card.json","version":"1.6","body":[{"type":"Table","columns":[{"width":1},{"width":1}],"rows":[{"type":"TableRow","cells":[{"type":"TableCell","items":[{"type":"TextBlock","text":"Duration","weight":"Bolder"}]},{"type":"TableCell","items":[{"type":"Input.Text","id":"duration"}]}]},{"type":"TableRow","cells":[{"type":"TableCell","items":[{"type":"TextBlock","text":"Playback speed","weight":"Bolder"}]},{"type":"TableCell","items":[{"type":"Input.ChoiceSet","choices":[{"title":"1x","value":"1"},{"title":"10x","value":"10"},{"title":"60x","value":"60"},{"title":"600x","value":"600"}],"id":"speed","value":"1","isRequired":true}]}]}]}]})
+event simPlay($duration string, $speed string, $conversation string) {
+  if exists !Play(_state == "Active") {
+    return { message: "Simulation already in progress" };
+  } else {
+    update simulation(id == 1, cid: $conversation, request_time: Now());
+    let $duration = ParseDuration($duration);
+    !Play(_cid -> $conversation, speed -> JsonParse($speed), $duration);
+  }
+}
+
+rule !Play($_cid, $duration, $speed) {
+  let $start_time = GetStartTime();
+  !Start($_cid, $start_time, $duration, $speed);
+  if $duration {
+    let $secs = $duration / $speed;
+    if $secs < 1 {
+      let $secs = 1;
+    }
+    let $end = Now() + Ceil($secs) * 1 sec;
+    !EndDuration($_cid, $start_time, $duration, $secs) after $end;
+  } else {
+    # no duration, run until stopped by user
+    !Stopped($_cid);
+  }
+}
+
+task !Start($_cid, $start_time, $duration, $speed) {
+  update registered_sim(done <> 0, done: 0);
+  if $duration {
+    pncp request sim_control/play($duration, $speed, $start_time);
+  } else {
+    pncp request sim_control/play($speed, $start_time);
+  }
+  pncp status(message -> "Playback started at simulation time " + $start_time) to $_cid;
+}
+
+task !EndDuration($_cid, $start_time, $duration, $secs) {
+  let $stopped = $start_time + $duration * 1 sec;
+  log info("Reached end of duration in " + $secs + " seconds");
+  update simulation(paused_time: $stopped);
+  pncp response(message -> "Playback stopped at " + $stopped) to $_cid;
+}
+
+%skill(subject=simulation,action=stop)
+event simStop($conversation string) {
+  with simulation(id == 1, $cid) {
+    if exists !Stopped(_cid == $cid) {
+      assert !Stopped(_cid -> $cid);
+    }
+    cancel !Play(_cid -> $cid);
+    !Stop(_cid -> $cid);
+  }
+}
+
+task !Stop($_cid) {
+  pncp request sim_control/stop();
+}
+
+%skill(subject=simulation,action=reset)
+event simReset($conversation string) {
+  let $null = JsonParse("null");
+  update simulation(id == 1, request_time: $null, paused_time: $null, done: 0);
+}
+
+%observer(subject=sim_control,action=register_sim_agent)
+event registerSim($name string, $start_time string) {
+  with registered_sim(name == $name, id: $id) {
+    update registered_sim(id == $id, $start_time);
+  } else {
+    insert registered_sim($name, $start_time);
+  }
+}
+
+%observer(subject=sim_control,action=sim_agent_stopped)
+event simStopped($name string, $stop_time string) {
+  update registered_sim(name == $name, $stop_time);
+}
+
+%observer(subject=sim_control,action=sim_agent_finished)
+event simFinish($name string, $end_time string) {
+  update registered_sim(name == $name, done: 1, $end_time);
+}
+
+# This needs to be on a second boundary, or the stop time may be incorrect
+# because the DB stores times to the nearest second
+
+function GetStartTime() {
+  with simulation($paused_time, $request_time) {
+    if $paused_time {
+      return $paused_time;
+    }
+
+    with registered_sim(min(start_time): $start_time) {
+      if $start_time {
+        return $start_time;
+      }
+    }
+
+    return $request_time;
+  }
+}
+
+function ParseDuration($s string) {
+  if $s {
+    let $value = JsonParse(CaptureRe("([0-9]+)", $s));
+    let $unit = CaptureRe("[0-9]+ *([a-zA-Z]+)", $s);
+    log info($value + " " + $unit);
+    if MatchRe("^[Hh][ours]*", $unit) {
+      return $value * 3600;
+    } else if MatchRe("^[Mm][inutes]*", $unit) {
+      return $value * 60;
+    } else if MatchRe("^[Ss][econds]*", $unit) {
+      return $value;
+    } else if MatchRe("^[Dd][ays]*", $unit) {
+      return $value * 24 * 3600;
+    }
+  }
+}
